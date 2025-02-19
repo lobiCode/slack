@@ -206,7 +206,20 @@ type completeUploadExternalParameters struct {
 	threadTimestamp string
 }
 
+type CompleteUploadExternalParameters struct {
+	Files           []FileSummary `json:"files"`
+	Title           string
+	Channel         string
+	InitialComment  string
+	ThreadTimestamp string
+}
+
 type completeUploadExternalResponse struct {
+	SlackResponse
+	Files []FileSummary `json:"files"`
+}
+
+type CompleteUploadExternalResponse struct {
 	SlackResponse
 	Files []FileSummary `json:"files"`
 }
@@ -542,6 +555,37 @@ func (api *Client) uploadToURL(ctx context.Context, params uploadToURLParameters
 	return err
 }
 
+// CompleteUploadExternal once files are uploaded, this completes the upload and shares it to the specified channel
+func (api *Client) CompleteUploadExternal(ctx context.Context, req CompleteUploadExternalParameters) (*CompleteUploadExternalResponse, error) {
+	requestBytes, err := json.Marshal(req.Files)
+	if err != nil {
+		return nil, err
+	}
+	values := url.Values{
+		"token": {api.token},
+		"files": {string(requestBytes)},
+	}
+
+	if req.Channel != "" {
+		values.Add("channel_id", req.Channel)
+	}
+	if req.InitialComment != "" {
+		values.Add("initial_comment", req.InitialComment)
+	}
+	if req.ThreadTimestamp != "" {
+		values.Add("thread_ts", req.ThreadTimestamp)
+	}
+	response := &CompleteUploadExternalResponse{}
+	err = api.postMethod(ctx, "files.completeUploadExternal", values, response)
+	if err != nil {
+		return nil, err
+	}
+	if response.Err() != nil {
+		return nil, response.Err()
+	}
+	return response, nil
+}
+
 // completeUploadExternal once files are uploaded, this completes the upload and shares it to the specified channel
 func (api *Client) completeUploadExternal(ctx context.Context, fileID string, params completeUploadExternalParameters) (file *completeUploadExternalResponse, err error) {
 	request := []FileSummary{{ID: fileID, Title: params.title}}
@@ -629,4 +673,39 @@ func (api *Client) UploadFileV2Context(ctx context.Context, params UploadFileV2P
 	}
 
 	return &c.Files[0], nil
+}
+
+func (api *Client) UploadFileV2_1Context(ctx context.Context, params UploadFileV2Parameters) (*FileSummary, error) {
+	if params.Filename == "" {
+		return nil, fmt.Errorf("file.upload.v2: filename cannot be empty")
+	}
+	if params.FileSize == 0 {
+		return nil, fmt.Errorf("file.upload.v2: file size cannot be 0")
+	}
+
+	u, err := api.getUploadURLExternal(ctx, getUploadURLExternalParameters{
+		altText:     params.AltTxt,
+		fileName:    params.Filename,
+		fileSize:    params.FileSize,
+		snippetText: params.SnippetText,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	err = api.uploadToURL(ctx, uploadToURLParameters{
+		UploadURL: u.UploadURL,
+		Reader:    params.Reader,
+		File:      params.File,
+		Content:   params.Content,
+		Filename:  params.Filename,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return &FileSummary{
+		ID:    u.FileID,
+		Title: params.Title,
+	}, nil
 }
